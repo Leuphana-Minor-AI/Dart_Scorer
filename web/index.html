@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0e14">
+  <title>Dart Scorer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-dot"></span>Dart Scorer</div>
+    <div class="status" id="status">
+      <span class="pill" id="pill-camera">Kamera …</span>
+      <span class="pill" id="pill-cal">Kalibrierung …</span>
+      <span class="pill subtle" id="pill-fps"></span>
+      <span class="pill subtle" id="pill-ws">Verbinde …</span>
+    </div>
+    <details class="menu" id="menu">
+      <summary class="btn icon" title="Kamera & Kalibrierung">⚙︎</summary>
+      <div class="menu-panel">
+        <button class="menu-item" data-detect="recalibrate"><b>Rekalibrieren</b><small>Board neu suchen</small></button>
+        <button class="menu-item" data-detect="learn_empty"><b>Board leer</b><small>Störstellen neu lernen (Pfeile gezogen)</small></button>
+        <button class="menu-item" data-detect="bull_offset"><b>Bull-Offset</b><small>Ein Pfeil im Bull: Versatz messen</small></button>
+        <button class="menu-item" data-detect="lock"><b>Lock</b><small>Kalibrierung einfrieren / freigeben</small></button>
+        <button class="menu-item" data-detect="snapshot"><b>Schnappschuss</b><small>Bild nach snapshots/ speichern</small></button>
+        <button class="menu-item" id="btn-camera-toggle"><b>Kamerabild</b><small>ein- / ausblenden</small></button>
+        <button class="menu-item danger" id="btn-end-game"><b>Spiel beenden</b><small>zurück zur Einrichtung</small></button>
+      </div>
+    </details>
+  </header>
+
+  <!-- Einrichtung -->
+  <main id="view-setup" class="view">
+    <section class="card setup">
+      <h1>Neues Spiel</h1>
+      <div class="field">
+        <label>Spieler</label>
+        <div id="player-list" class="player-list"></div>
+        <button class="btn ghost" id="btn-add-player">+ Spieler hinzufügen</button>
+      </div>
+      <div class="field row">
+        <label>Modus</label>
+        <div class="segmented" id="seg-score">
+          <button data-value="301">301</button>
+          <button data-value="501" class="active">501</button>
+          <button data-value="701">701</button>
+        </div>
+      </div>
+      <div class="field row">
+        <label>Finish</label>
+        <div class="segmented" id="seg-double">
+          <button data-value="1" class="active">Double-Out</button>
+          <button data-value="0">Single-Out</button>
+        </div>
+      </div>
+      <div class="field row">
+        <label>Legs</label>
+        <div class="segmented" id="seg-legs">
+          <button data-value="1" class="active">Best of 1</button>
+          <button data-value="2">Best of 3</button>
+          <button data-value="3">Best of 5</button>
+        </div>
+      </div>
+      <button class="btn primary big" id="btn-start">Spiel starten</button>
+      <p class="hint" id="setup-hint"></p>
+    </section>
+    <section class="card camera-card">
+      <img id="cam-setup" alt="Kamerabild" src="/stream.mjpg">
+      <p class="hint">Board vollständig im Bild (Position egal), alle Drahtkreuzungen sichtbar. Status: <span id="setup-cal"></span></p>
+      <p class="hint" id="addresses"></p>
+    </section>
+  </main>
+
+  <!-- Spiel -->
+  <main id="view-game" class="view" hidden>
+    <section class="players" id="players"></section>
+
+    <section class="turn card">
+      <div class="turn-head">
+        <div>
+          <div class="eyebrow">Am Wurf</div>
+          <div class="turn-player" id="turn-player">–</div>
+        </div>
+        <div class="turn-remaining"><span id="turn-remaining">501</span><small>Rest</small></div>
+      </div>
+      <div class="darts" id="darts">
+        <button class="dart-slot" data-index="0"><span class="slot-label">1</span><span class="slot-field">–</span><span class="slot-points"></span></button>
+        <button class="dart-slot" data-index="1"><span class="slot-label">2</span><span class="slot-field">–</span><span class="slot-points"></span></button>
+        <button class="dart-slot" data-index="2"><span class="slot-label">3</span><span class="slot-field">–</span><span class="slot-points"></span></button>
+      </div>
+      <div class="turn-info">
+        <div class="turn-sum">Aufnahme <b id="turn-sum">0</b></div>
+        <div class="checkout" id="checkout"></div>
+      </div>
+      <div class="banner" id="banner" hidden></div>
+      <div class="actions">
+        <button class="btn" data-turn="undo"><span class="k">↶</span>Undo</button>
+        <button class="btn" data-turn="miss"><span class="k">✕</span>Miss</button>
+        <button class="btn" id="btn-add-dart"><span class="k">+</span>Pfeil</button>
+        <button class="btn primary" data-turn="next">Weiter <span class="k">▶</span></button>
+      </div>
+      <p class="hint" id="turn-hint">Pfeil antippen zum Korrigieren · „+ Pfeil“ trägt einen nicht erkannten Pfeil nach.</p>
+    </section>
+
+    <section class="side">
+      <div class="card board-card">
+        <svg id="board" viewBox="-230 -230 460 460" aria-label="Dartboard"></svg>
+      </div>
+      <div class="card camera-card" id="camera-card">
+        <img id="cam-game" alt="Kamerabild" src="/stream.mjpg">
+      </div>
+      <div class="card events-card">
+        <div class="eyebrow">Verlauf</div>
+        <div class="events" id="events"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Korrektur / Nachtragen -->
+  <div class="modal" id="modal-correct" hidden>
+    <div class="modal-body">
+      <div class="modal-head">
+        <h2 id="correct-title">Pfeil <span id="correct-index">1</span> korrigieren</h2>
+        <button class="btn icon" id="btn-correct-close" aria-label="Schließen">✕</button>
+      </div>
+      <p class="hint">Auf das Feld tippen, in dem der Pfeil wirklich steckt.</p>
+      <svg id="board-correct" viewBox="-230 -230 460 460" aria-label="Dartboard zum Korrigieren"></svg>
+      <div class="quick">
+        <button class="btn" data-field="MISS">Miss / Bounce-out</button>
+        <button class="btn" data-field="BULL">Bull (25)</button>
+        <button class="btn" data-field="BULLSEYE">Bullseye (50)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Spielende -->
+  <div class="modal" id="modal-winner" hidden>
+    <div class="modal-body center">
+      <div class="trophy">🏆</div>
+      <h2 id="winner-name"></h2>
+      <p id="winner-stats" class="hint"></p>
+      <div class="quick">
+        <button class="btn primary" id="btn-rematch">Revanche</button>
+        <button class="btn" id="btn-to-setup">Neues Spiel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
