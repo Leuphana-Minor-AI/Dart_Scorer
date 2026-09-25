@@ -1,0 +1,26 @@
+# Umgebung / Caches
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.DS_Store
+.claude/
+
+# Lokale Zustaende und Einstellungen
+dart_offset.json
+web_settings.json
+camera_calib.npz
+
+# Aufnahmen und Testbilder (enthalten private Raumaufnahmen)
+snapshots/
+test_images/
+
+# Trainingsartefakte, Datensaetze und Archive
+runs/
+dataset/
+.zips_original/
+*.zip
+
+# Fremde Modellgewichte (dart-sense: nicht weiterverteilbar; yolo11n: Ultralytics-Download)
+models/dart_sense_yolov8n.pt
+yolo11n.pt
