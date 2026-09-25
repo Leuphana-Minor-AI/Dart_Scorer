@@ -1,150 +1,152 @@
-# Dart Scorer – automatisches Zählen beim Steeldart mit einer Kamera
+# Dart Scorer – automatic steel-tip dart scoring with a single camera
 
-Ein Dartboard, eine Kamera (GoPro oder Webcam) und ein Laptop: Das Programm erkennt die
-Dartscheibe im Kamerabild, kalibriert sich selbst, erkennt die Pfeile und zählt ein X01-Spiel
-(301/501/701) für bis zu vier Spieler – mit Scoreboard im Browser, auch auf dem Handy.
+A dartboard, a camera (GoPro or webcam) and a laptop: the program finds the dartboard in the
+camera image, calibrates itself, detects the darts and scores an X01 game (301/501/701) for up to
+four players – with a scoreboard in the browser, on the laptop or on a phone.
 
-## Funktionen
+## Features
 
-- **Automatische Kalibrierung** über die Drahtkreuzungen am Double-Ring (6 Stützpunkte,
-  Kleinste-Quadrate-Homographie); Board darf irgendwo im Bild stehen, Auto-Rekalibrierung,
-  wenn sich Kamera oder Board bewegen
-- **Pfeil-Erkennung** mit einem YOLO-Modell, Spurverfolgung über mehrere Frames, Ausblenden
-  von Störstellen, Duplikat-Erkennung, Markierung unsicherer Pfeile (`?`) nahe an Drähten
-- **X01-Spiel**: 301/501/701, 1–4 Spieler, Double-Out/Single-Out, Bust-Regeln, Legs (Best of n),
-  Anwurfwechsel, Checkout-Vorschläge, Statistik (Average, First 9, 180er, höchstes Finish, bestes Leg)
-- **Web-Oberfläche**: großes Scoreboard, Aufnahme mit drei Pfeilen, Korrektur per Klick auf das Board,
-  Undo, Miss/Bounce-out, Pfeil nachtragen, Kamerabild mit Overlay, Sieger-Anzeige mit Revanche;
-  responsives Layout für Handy/Tablet im selben Netz
-- **Diagnose**: Kalibrier-/Kamerastatus, FPS, Schnappschüsse, Bull-Offset-Kalibrierung,
-  manuelles Markieren des Boards, Modellvergleich auf Testbildern
+- **Automatic calibration** from the wire intersections on the double ring (6 reference points,
+  least-squares homography); the board can be anywhere in the frame; automatic recalibration when
+  the camera or the board moves
+- **Dart detection** with a YOLO model, tracking across frames, suppression of static false
+  positives, duplicate handling, marking of uncertain darts (`?`) close to a wire
+- **X01 game**: 301/501/701, 1–4 players, double-out or single-out, bust rules, legs (best of n),
+  alternating throw-off, checkout suggestions, statistics (average, first 9, 180s, highest finish,
+  best leg)
+- **Web interface**: large scoreboard, current turn with three darts, correction by tapping the
+  board, undo, miss/bounce-out, adding a missed dart, camera view with overlay, winner screen with
+  rematch; responsive layout for phones and tablets on the same network
+- **Diagnostics**: calibration/camera status, FPS, snapshots, bull-offset calibration, manual board
+  selection, model comparison on test images
 
-## Aufbau
+## Structure
 
 ```
-dart_app.py            Startpunkt der Web-App (Engine-Thread + Web-Server in einem Prozess)
-engine/detector.py     Kamera + Erkennung → Ereignisse (dart_added, darts_removed, calibration, camera)
-live_scorer.py         Kalibrierung, Board-Ausschnitt, Pfeil-Verfolgung, Punkteberechnung (+ alter OpenCV-Modus)
-camera_stream.py       Kameraerkennung (AVFoundation / DirectShow / V4L2), Threaded Capture, Testbild-Modus
-dart_geometry.py       Board-Geometrie nach WDF, Homographie, Feld aus (x, y) in mm, Drahtabstand
-lens_undistort.py      Optionale Linsenentzerrung (calibrate_lens.py erzeugt camera_calib.npz)
-game/x01.py            Spiellogik X01 (reines Regelwerk, ohne Kamera)
-server/app.py          FastAPI: Zustand per WebSocket, Kamerabild als MJPEG, Aktionen per REST
-web/                   Oberfläche (HTML/CSS/JS ohne Build-Tools)
-tests/test_x01.py      Tests der Spiellogik (pytest)
-tools/compare_models.py  Zwei Modelle auf Testbildern vergleichen
-train.py, evaluate.py  Training / Auswertung des eigenen YOLO-Modells (DeepDarts-Datensatz)
-models/                Modellgewichte (siehe unten)
+dart_app.py            Entry point of the web app (engine thread + web server in one process)
+engine/detector.py     Camera + detection → events (dart_added, darts_removed, calibration, camera)
+live_scorer.py         Calibration, board crop, dart tracking, scoring (+ legacy OpenCV window mode)
+camera_stream.py       Camera discovery (AVFoundation / DirectShow / V4L2), threaded capture, test-image mode
+dart_geometry.py       Board geometry per WDF rules, homography, field from (x, y) in mm, wire distance
+lens_undistort.py      Optional lens undistortion (calibrate_lens.py creates camera_calib.npz)
+game/x01.py            X01 game logic (pure rules, no camera)
+server/app.py          FastAPI: state via WebSocket, camera image as MJPEG, actions via REST
+web/                   Frontend (HTML/CSS/JS, no build tools)
+tests/test_x01.py      Game-logic tests (pytest)
+tools/compare_models.py  Compare two models on test images
+train.py, evaluate.py  Training / evaluation of the custom YOLO model (DeepDarts dataset)
+models/                Model weights (see below)
 ```
 
 ## Installation
 
-Python ≥ 3.10. Empfohlen: [uv](https://docs.astral.sh/uv/).
+Python ≥ 3.10. Recommended: [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements.txt opencv-python
 ```
 
-Windows (Anaconda): `setup_windows.bat` installiert PyTorch (CPU), Ultralytics und OpenCV.
+Windows (Anaconda): `setup_windows.bat` installs PyTorch (CPU), Ultralytics and OpenCV.
 
-### Modelle
+### Models
 
-Zwei Modelle werden unterstützt, beide mit derselben Klassenreihenfolge
+Two models are supported, both with the same class order
 (`cal_top` 5|20, `cal_bottom` 3|17, `cal_left` 11|8, `cal_right` 6|13, `dart_tip`):
 
-| Datei | Herkunft | Einsatz |
+| File | Origin | Use |
 |---|---|---|
-| `models/dart_sense_yolov8n.pt` | [bnww/dart-sense](https://github.com/bnww/dart-sense) (Ben Willshaw), YOLOv8n, ~24.000 Bilder aus vielen Kamerawinkeln, zwei Zusatz-Kalibrierpunkte (Klassen `9`, `15`); Lizenz **CC BY-NC 4.0** | **Standard.** Findet die Eintrittspunkte der Pfeile auch bei schräger Kamera |
-| `models/dart_yolo11n_best.pt` | eigenes Training (YOLO11n) auf dem DeepDarts-Datensatz | Rückfall, wenn die dart-sense-Datei fehlt; nur für frontale Kamera geeignet |
+| `models/dart_sense_yolov8n.pt` | [bnww/dart-sense](https://github.com/bnww/dart-sense) (Ben Willshaw), YOLOv8n, ~24,000 images from many camera angles, two extra calibration points (classes `9`, `15`); license **CC BY-NC 4.0** | **Default.** Finds the dart entry points even with an oblique camera |
+| `models/dart_yolo11n_best.pt` | own training (YOLO11n) on the DeepDarts dataset | Fallback if the dart-sense file is missing; only suitable for a frontal camera |
 
-Die dart-sense-Gewichte sind nicht Teil dieses Repositories (Lizenz erlaubt keine Weitergabe).
-Einmalig herunterladen:
+The dart-sense weights are not part of this repository (the license does not allow
+redistribution). Download once:
 
 ```bash
 curl -L -o models/dart_sense_yolov8n.pt https://github.com/bnww/dart-sense/raw/main/weights.pt
 ```
 
-### GoPro als Webcam
+### GoPro as a webcam
 
-GoPro Webcam-App installieren, Kamera per USB oder WLAN verbinden. Empfohlene Einstellungen:
-Sichtfeld „Linear“ (weniger Verzerrung), automatisches Ausschalten deaktivieren. Alternativ
-funktioniert jede Webcam. Das Programm probiert die Kamera-Indizes 0–3 durch und wählt die mit
-Live-Bild; mit `--camera N` lässt sich der Index festlegen.
+Install the GoPro Webcam app and connect the camera via USB or Wi-Fi. Recommended settings:
+field of view "Linear" (less distortion), auto power-off disabled. Any webcam works as well.
+The program probes camera indices 0–3 and picks the one with a live image; `--camera N` selects
+an index explicitly.
 
-**macOS:** Kamerazugriff wird nur Prozessen gewährt, die aus Terminal.app gestartet wurden – daher
-die `.command`-Skripte per Doppelklick oder `open -a Terminal <skript>` starten.
+**macOS:** camera access is only granted to processes started from Terminal.app – start the
+`.command` scripts by double-clicking them or with `open -a Terminal <script>`.
 
-## Starten
+## Running
 
 ```bash
-open -a Terminal _start_webapp.command      # macOS: startet Server und öffnet den Browser
+open -a Terminal _start_webapp.command      # macOS: starts the server and opens the browser
 python dart_app.py [--camera 1] [--port 20744]
 ```
 
-Im Terminal erscheinen die Adressen: `http://localhost:20744` auf dem Laptop, dazu alle
-Netzwerkadressen des Rechners für Handy/Tablet im selben Netz (auch auf der Einrichtungsseite
-angezeigt). In verwalteten WLANs (Uni, Firma) ist Gerät-zu-Gerät-Verkehr oft gesperrt – dann
-das Handy per USB-Tethering oder Hotspot mit dem Laptop verbinden.
+The terminal prints the addresses: `http://localhost:20744` on the laptop, plus every network
+address of the machine for phones/tablets on the same network (also shown on the setup page).
+Managed Wi-Fi networks (university, company) often block device-to-device traffic – in that case
+connect the phone to the laptop via USB tethering or a hotspot.
 
-Ablauf im Spiel: Spieler und Modus wählen → werfen → Pfeile erscheinen in der Aufnahme →
-bei Bedarf Pfeil antippen und richtiges Feld auf dem Board anklicken → Pfeile ziehen →
-nächster Spieler. „Weiter“ nur, wenn früher gewechselt werden soll.
+Game flow: choose players and mode → throw → the darts appear in the current turn → if needed tap a
+dart and click the correct field on the board → pull the darts → next player. "Next" is only
+needed to switch early.
 
-**Tastatur:** `U` Undo · `Leertaste`/`Enter` Weiter · `M` Miss · `+`/`A` Pfeil nachtragen ·
-`1`–`3` Pfeil korrigieren · `Esc` schließen
+**Keyboard:** `U` undo · `Space`/`Enter` next · `M` miss · `+`/`A` add a dart ·
+`1`–`3` correct a dart · `Esc` close
 
-**Menü ⚙︎:** Rekalibrieren · Board leer (Störstellen neu lernen, nach dem Ziehen aller Pfeile) ·
-Bull-Offset (ein Pfeil im Bull → systematischen Versatz messen) · Lock · Schnappschuss ·
-Kamerabild · Spiel beenden
+**Menu ⚙︎:** Recalibrate · Empty board (relearn static false positives after pulling all darts) ·
+Bull offset (one dart in the bull → measure systematic offset) · Lock · Snapshot · Camera view ·
+End game
 
-### Alter Fenstermodus (Debugging)
+### Legacy window mode (debugging)
 
-`_start_scorer.command` bzw. `run_dart_scorer.bat` starten `live_scorer.py` mit OpenCV-Fenster,
-Radar und Tastensteuerung (`C` Rekalibrieren, `L` Lock, `R` Board markieren, `B` Bull-Offset,
-`S` Schnappschuss, `TAB`+Pfeiltasten Korrektur, `0`–`4` Kamera, `Q` Beenden).
-Ohne Kamera nutzt er Bilder aus `test_images/`.
+`_start_scorer.command` or `run_dart_scorer.bat` start `live_scorer.py` with an OpenCV window,
+radar and keyboard control (`C` recalibrate, `L` lock, `R` mark board, `B` bull offset,
+`S` snapshot, `TAB` + arrow keys correction, `0`–`4` camera, `Q` quit).
+Without a camera it uses images from `test_images/`.
 
-## So funktioniert die Erkennung
+## How the detection works
 
-1. **Board suchen** – Vollbild durch das Modell, alle 10 Frames zusätzlich kachelweise in voller
-   Auflösung. Ab zwei Kalibrierpunkten wird ein quadratischer Ausschnitt ums Board gelegt und nur
-   noch dieser ausgewertet, skaliert auf ~500 px Boardgröße – unabhängig vom Kameraabstand.
-2. **Kalibrieren** – Homographie aus den Drahtkreuzungen (mm-Referenzen nach WDF in
-   `dart_geometry.py`). Punktgedächtnis (3 s), rotierende Skalierungs-/Kontrastvarianten,
-   Plausibilitätsprüfung (Durchmesser-Mittelpunkte, Reihenfolge), Vorhersage fehlender Punkte.
-   Nach 15 stabilen Frames eingerastet; Drift-Erkennung kalibriert bei Bewegung neu.
-3. **Pfeile** – Modell auf dem Ausschnitt in zwei wechselnden Größen; Radiusfilter (> 180 mm
-   verworfen); Störstellen des leeren Boards ausgeblendet; Duplikate (Spitze + Schaft) entlang der
-   Schaftrichtung zusammengefasst; Spur gilt ab 3 Treffern, Position geglättet.
-4. **Punkte** – Pixel → mm → Ring/Sektor. Näher als 3 mm an einem Draht (oder knapp außerhalb
-   des Double-Rings) → `?`. Ein optionaler konstanter Offset (Bull-Kalibrierung) wird abgezogen.
-5. **Spiel** – Die Engine meldet nur Ereignisse; `game/x01.py` entscheidet Bust, Finish, Legs.
-   Ein einmal gezählter Pfeil wird bis zum Ziehen aller Pfeile nicht erneut gezählt.
+1. **Finding the board** – full frame through the model, plus every 10 frames a tiled pass at
+   native resolution. From two calibration points on, a square crop is placed around the board and
+   only that crop is processed, scaled to ~500 px board size – independent of the camera distance.
+2. **Calibration** – homography from the wire intersections (mm references per WDF in
+   `dart_geometry.py`). Point memory (3 s), rotating scale/contrast variants, plausibility check
+   (diameter midpoints, order), prediction of missing points. Locked after 15 stable frames;
+   drift detection recalibrates when something moves.
+3. **Darts** – model on the crop in two alternating sizes; radius filter (> 180 mm discarded);
+   static false positives of the empty board suppressed; duplicates (tip + barrel) merged along
+   the shaft direction; a track counts after 3 hits, position smoothed.
+4. **Scoring** – pixel → mm → ring/sector. Closer than 3 mm to a wire (or just outside the double
+   ring) → `?`. An optional constant offset (bull calibration) is subtracted.
+5. **Game** – the engine only reports events; `game/x01.py` decides bust, finish and legs.
+   A dart that has been counted is not counted again until all darts are pulled.
 
-Wichtige Stellschrauben in `live_scorer.py`: `dart_conf` (Schwelle für Pfeile, Standard 0,15),
-`conf_thresh` (Kalibrierpunkte, 0,25), `track_min_hits`, `track_merge_px`/`shaft_dir`
-(Duplikate), `artifact_*` (Störstellen), `UNCERTAIN_WIRE_MM`, `drift_*` (Auto-Rekalibrierung).
+Main tuning knobs in `live_scorer.py`: `dart_conf` (dart threshold, default 0.15),
+`conf_thresh` (calibration points, 0.25), `track_min_hits`, `track_merge_px`/`shaft_dir`
+(duplicates), `artifact_*` (static false positives), `UNCERTAIN_WIRE_MM`, `drift_*`
+(auto recalibration).
 
-## Genauigkeit und Grenzen
+## Accuracy and limitations
 
-- Die Kalibrierung ist sehr genau (Restfehler ≈ 0,1 mm an den Stützpunkten); die Pfeilposition
-  des Modells streut nur 1–3 px. Fehler entstehen fast nur an Drahtgrenzen und durch die
-  Kameraperspektive.
-- **Kameraposition**: möglichst auf Board-Höhe und nahe der Wurfachse. Je steiler die Kamera von
-  unten oder seitlich schaut, desto stärker verdecken Barrel und Flight die Spitze und desto
-  öfter überlappen sich benachbarte Pfeile. Sich überlappende Pfeile sind die häufigste Ursache
-  für einen fehlenden Pfeil → mit „+ Pfeil“ nachtragen.
-- **Licht**: gleichmäßiges Licht von vorn erhöht die Erkennungssicherheit deutlich.
-- Ein Modell, das mit eigenen Bildern aus der eigenen Kameraposition nachtrainiert wird, ist der
-  nächste Schritt zu höherer Trefferquote (Pipeline: `train.py`, `evaluate.py`, `tools/`).
+- Calibration is very precise (residual ≈ 0.1 mm at the reference points); the model's dart
+  position varies by only 1–3 px. Errors occur almost exclusively at wire boundaries and because of
+  the camera perspective.
+- **Camera position**: as close to board height and to the throwing axis as possible. The steeper
+  the camera looks from below or from the side, the more the barrel and flight hide the tip and the
+  more often neighbouring darts overlap. Overlapping darts are the most common cause of a missing
+  dart → add it with "+ Dart".
+- **Light**: even light from the front improves detection confidence considerably.
+- A model fine-tuned with your own images from your own camera position is the next step towards
+  a higher hit rate (pipeline: `train.py`, `evaluate.py`, `tools/`).
 
-## Training und Auswertung
+## Training and evaluation
 
-`train.py` trainiert YOLO11n auf dem DeepDarts-Datensatz (`dataset/dataset.yaml`, 5 Klassen);
-`evaluate.py` wertet auf den Validierungsbildern aus; `docker_train.sh`, `train_spark.sh` und
-`transfer_to_spark.bat` sind Hilfsskripte für Training im Container bzw. auf einem Remote-Rechner.
-`tools/compare_models.py` vergleicht zwei Modelle auf Testbildern (Kalibrierpunkte, Pfeilabstände).
+`train.py` trains YOLO11n on the DeepDarts dataset (`dataset/dataset.yaml`, 5 classes);
+`evaluate.py` evaluates on the validation images; `docker_train.sh`, `train_spark.sh` and
+`transfer_to_spark.bat` are helpers for training in a container or on a remote machine.
+`tools/compare_models.py` compares two models on test images (calibration points, dart distances).
 
 ## Tests
 
@@ -152,12 +154,12 @@ Wichtige Stellschrauben in `live_scorer.py`: `dart_conf` (Schwelle für Pfeile, 
 python -m pytest tests/ -q
 ```
 
-## Quellen und Lizenzen
+## Sources and licenses
 
 - McNally et al., *DeepDarts: Modeling Keypoints as Objects for Automatic Scorekeeping in Darts
-  using a Single Camera*, CVPRW 2021 – Ansatz und Datensatz ([arXiv](https://arxiv.org/abs/2105.09880),
-  [Code](https://github.com/wmcnally/deep-darts))
-- Ben Willshaw, [dart-sense](https://github.com/bnww/dart-sense) – Standardmodell, CC BY-NC 4.0
-  (nur nicht-kommerzielle Nutzung, nicht weiterverteilen)
+  using a Single Camera*, CVPRW 2021 – approach and dataset ([arXiv](https://arxiv.org/abs/2105.09880),
+  [code](https://github.com/wmcnally/deep-darts))
+- Ben Willshaw, [dart-sense](https://github.com/bnww/dart-sense) – default model, CC BY-NC 4.0
+  (non-commercial use only, no redistribution)
 - [Ultralytics YOLO](https://github.com/ultralytics/ultralytics) (AGPL-3.0), [OpenCV](https://opencv.org),
   [FastAPI](https://fastapi.tiangolo.com)
